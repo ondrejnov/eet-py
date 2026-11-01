@@ -222,7 +222,8 @@ class Dispatcher:
         faults = _xpath(envelope, "/s:Envelope/s:Body/s:Fault")
         if faults:
             message = str(faults[0].xpath("string(faultstring)")).strip()
-            raise ServerError(f"SOAP fault: {message}", 0)
+            # A fault is not an answer to the sale, so its state stays unknown.
+            raise TransportError(f"SOAP fault: {message}")
 
         answers = _xpath(envelope, "/s:Envelope/s:Body/eet:Odpoved")
         if not answers:
@@ -233,15 +234,16 @@ class Dispatcher:
         confirmation = _first(answer, "eet:Potvrzeni")
         error = _first(answer, "eet:Chyba")
 
-        if confirmation is None and error is None:
-            raise TransportError("The response contains neither a confirmation nor an error.")
+        pok = _attribute(confirmation, "pok")
+        if pok is None and error is None:
+            raise TransportError("The response contains neither a confirmation code nor an error.")
 
         result = confirmation if confirmation is not None else error
         response = Response(
             uuid=_attribute(header, "uuid_zpravy"),
             received_at=_attribute(header, "dat_prij"),
             rejected_at=_attribute(header, "dat_odmit"),
-            pok=_attribute(confirmation, "pok"),
+            pok=pok,
             error_code=None if error is None else _error_code(error),
             error_message=None if error is None else text_content(error),
             test=_attribute(result, "test") in ("true", "1"),

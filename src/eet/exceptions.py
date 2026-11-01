@@ -25,7 +25,7 @@ class ValidationError(ClientError):
 
 
 class TransportError(ClientError):
-    """No valid EET response was received (timeout, connection error, unexpected HTTP response).
+    """No valid EET response was received (timeout, connection error, unexpected HTTP response, SOAP fault).
 
     The state of the sale is unknown, so it has to be sent again: see Receipt.for_resend().
     """

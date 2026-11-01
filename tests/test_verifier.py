@@ -107,6 +107,30 @@ def test_invalid_base64():
     )
 
 
+def test_relative_namespace_in_the_body_cannot_be_canonicalized():
+    tampered = CONFIRMATION.replace(b"</eet:Odpoved>", b'<r:x xmlns:r="rel/ns"/></eet:Odpoved>')
+    assert tampered != CONFIRMATION
+    assert_rejected(tampered, "canonicalized")
+
+
+def test_relative_namespace_in_signed_info_cannot_be_canonicalized():
+    root = etree.fromstring(CONFIRMATION)
+    etree.SubElement(find(root, ns.DS, "SignedInfo"), "{rel/ns}x", nsmap={"r": "rel/ns"})
+    assert_rejected(root, "canonicalized")
+
+
+def test_certificate_with_an_unknown_key_algorithm():
+    rsa_encryption = bytes.fromhex("06092A864886F70D010101")
+    unknown_algorithm = bytes.fromhex("06092A864886F70D01017F")
+    root = etree.fromstring(CONFIRMATION)
+    token = find(root, ns.WSSE, "BinarySecurityToken")
+    der = base64.b64decode(token.text)
+    assert rsa_encryption in der
+    token.text = base64.b64encode(der.replace(rsa_encryption, unknown_algorithm)).decode()
+
+    assert_rejected(root, "public key")
+
+
 def test_unsigned_message():
     assert_rejected((FIXTURES / "playground-verification.xml").read_bytes(), "exactly one Signature")
 

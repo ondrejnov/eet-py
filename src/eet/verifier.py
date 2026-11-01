@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509 import verification
@@ -72,7 +72,7 @@ class ResponseVerifier:
         body = _single(envelope, "/s:Envelope/s:Body", "Body")
         _assert_references_body(reference, body)
 
-        digest = hashlib.sha256(canonicalize(body, _prefixes(reference, "ds:Transforms/ds:Transform"))).digest()
+        digest = hashlib.sha256(_canonicalize(body, _prefixes(reference, "ds:Transforms/ds:Transform"))).digest()
         expected_digest = _decode_base64(_single(reference, "ds:DigestValue", "DigestValue"))
         if expected_digest is None or not hmac.compare_digest(expected_digest, digest):
             raise ResponseVerificationError("The digest of soap:Body does not match the signature.")
@@ -80,8 +80,11 @@ class ResponseVerifier:
         certificate = _read_certificate(signature)
 
         signature_value = _decode_base64(_single(signature, "ds:SignatureValue", "SignatureValue"))
-        signed_data = canonicalize(signed_info, _prefixes(signed_info, "ds:CanonicalizationMethod"))
-        public_key = certificate.public_key()
+        signed_data = _canonicalize(signed_info, _prefixes(signed_info, "ds:CanonicalizationMethod"))
+        try:
+            public_key = certificate.public_key()
+        except (UnsupportedAlgorithm, ValueError) as e:
+            raise ResponseVerificationError("The embedded certificate has an unusable public key.") from e
         if signature_value is None or not isinstance(public_key, rsa.RSAPublicKey):
             raise ResponseVerificationError("The signature of the message is not valid.")
 
@@ -136,6 +139,13 @@ class ResponseVerifier:
 
         self._store = verification.Store(roots)
         self._intermediates = [c for c in certificates if c.subject != c.issuer]
+
+
+def _canonicalize(element: etree._Element, inclusive_prefixes: list[str] | None) -> bytes:
+    try:
+        return canonicalize(element, inclusive_prefixes)
+    except etree.LxmlError as e:
+        raise ResponseVerificationError("The signed content cannot be canonicalized.") from e
 
 
 def _assert_references_body(reference: etree._Element, body: etree._Element) -> None:

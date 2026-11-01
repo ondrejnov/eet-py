@@ -278,16 +278,45 @@ def test_verification_mode_cannot_hide_a_trust_failure():
         dispatcher.check(create_receipt())
 
 
-def test_soap_fault():
-    fault = (
-        f'<soapenv:Envelope xmlns:soapenv="{ns.SOAP}"><soapenv:Body><soapenv:Fault><faultcode>soapenv:Client</faultcode>'
-        "<faultstring>Bad message here</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>"
-    ).encode()
-    dispatcher, _ = dispatcher_for(HttpResponse(500, fault))
+SOAP_FAULT = (
+    f'<soapenv:Envelope xmlns:soapenv="{ns.SOAP}"><soapenv:Body><soapenv:Fault><faultcode>soapenv:Server</faultcode>'
+    "<faultstring>Internal Error</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>"
+).encode()
 
-    with pytest.raises(ServerError, match="SOAP fault: Bad message here"):
+
+def test_soap_fault_leaves_the_state_of_the_sale_unknown():
+    dispatcher, _ = dispatcher_for(HttpResponse(500, SOAP_FAULT))
+
+    with pytest.raises(TransportError, match="SOAP fault: Internal Error"):
         dispatcher.send(create_receipt())
+    assert dispatcher.last_response is None
+    assert dispatcher.last_response_body == SOAP_FAULT
+
+
+def test_verification_mode_does_not_mistake_a_soap_fault_for_a_refused_message():
+    dispatcher, _ = dispatcher_for(HttpResponse(500, SOAP_FAULT))
+
+    with pytest.raises(TransportError, match="SOAP fault: Internal Error"):
+        dispatcher.check(create_receipt())
+
+
+def test_verification_mode_keeps_the_details_of_every_refused_message():
+    dispatcher, _ = dispatcher_for(reject(4, "Neplatny podpis"))
+
     assert dispatcher.check(create_receipt()) is False
+    assert dispatcher.last_response.error_message == "Neplatny podpis"
+
+
+def test_response_which_cannot_be_canonicalized_is_not_trusted():
+    # Canonicalization refuses relative namespace URIs, such a reply must not escape as an lxml error.
+    signed = create_response_xml(f'<v4:Hlavicka {RECEIVED}/><v4:Potvrzeni pok="{POK}"/>', server_certificate)
+    tampered = signed.replace(b"<v4:Potvrzeni", b'<r:x xmlns:r="rel/ns"/><v4:Potvrzeni')
+    assert tampered != signed
+    dispatcher, _ = dispatcher_for(HttpResponse(200, tampered))
+
+    with pytest.raises(ResponseVerificationError, match="canonicalized") as info:
+        dispatcher.send(create_receipt())
+    assert info.value.response.pok == POK
 
 
 ENVELOPE = (
@@ -307,6 +336,10 @@ ENVELOPE = (
             id="document type declaration",
         ),
         pytest.param(HttpResponse(200, (ENVELOPE % "<v4:Hlavicka/>").encode()), id="neither confirmation nor error"),
+        pytest.param(
+            HttpResponse(200, (ENVELOPE % '<v4:Hlavicka/><v4:Potvrzeni test="true"/>').encode()),
+            id="confirmation without a confirmation code",
+        ),
         pytest.param(HttpResponse(200, (ENVELOPE % '<v4:Chyba test="true"/>').encode()), id="error without a code"),
     ],
 )

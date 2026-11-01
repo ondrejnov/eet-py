@@ -48,6 +48,8 @@ Ověřovací mód (`overeni="true"`) tržbu neeviduje, jen ověří spojení a z
 dispatcher.check(receipt)  # True = chyba 0, False = detail v dispatcher.last_response
 ```
 
+Když žádná platná odpověď nepřijde (výpadek, SOAP fault), vyvolá `check()` výjimku `TransportError` s popisem chyby.
+
 ## Položky tržby
 
 Položky lze předat jen pojmenovaně, nebo je nastavit jako atributy.
@@ -82,7 +84,7 @@ Všechny výjimky dědí z `EETError`.
 | --- | --- | --- |
 | `send()` vrátí POK | tržba přijata | uložit POK, vyhodnotit `dispatcher.warnings` a zalogovat `dispatcher.last_response.transaction_id` |
 | `ValidationError` | neplatná data, nic se neodeslalo | opravit data, seznam je v `errors` |
-| `TransportError` | timeout, výpadek nebo nečitelná odpověď, stav tržby není známý | co nejdříve poslat `for_resend()` |
+| `TransportError` | timeout, výpadek, SOAP fault nebo nečitelná odpověď, stav tržby není známý | co nejdříve poslat `for_resend()` |
 | `ServerError`, `is_retryable` je `True` | dočasná chyba serveru (kód -1 nebo 8) | poslat `for_resend()` později |
 | `ServerError`, `is_retryable` je `False` | kritická chyba, kód je v `code` | opravit příčinu |
 | `ResponseVerificationError` | odpovědi nelze důvěřovat | POK nepoužívat, prověřit |
